@@ -46,7 +46,7 @@ const COLOR_MAP = [
 
 //chunk資訊
 const chunkWidth = 16, chunkHeight = 16
-const chunkWidthCount = 3, chunkHeightCount = 3
+let chunkWidthCount, chunkHeightCount
 const cellSize = 10, cellWallGap = 2;
 let realPixelSize;
 let mapX = 0, mapY = 0;
