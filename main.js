@@ -190,7 +190,7 @@ function Main() {
                 cx--;
             if (y < 0)
                 cy--;
-            if (cx < 0 || cx > chunkWidthCount || cy < 0 || cy > chunkHeightCount) {
+            if (cx < 0 || cx >= chunkWidthCount || cy < 0 || cy >= chunkHeightCount) {
                 drag = false;
                 moved = false;
                 return;
