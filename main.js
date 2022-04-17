@@ -80,6 +80,8 @@ function Main() {
     getData('t=0', i => {
         i = i.split(',');
         const width = parseInt(i[0]), height = parseInt(i[1]);
+        chunkWidthCount = width;
+        chunkHeightCount = height;
         for (let x = 0; x < width; x++) {
             for (let y = 0; y < height; y++) {
                 getData(`x=${x}&y=${y}`, data => {
