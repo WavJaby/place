@@ -1,5 +1,5 @@
 //螢幕
-let screenScale = 1.5;
+let screenScale = 1;
 const screenMinScale = 0.05;
 const screenMaxScale = 5;
 const drawLineScreenScale = 1.5;
@@ -572,7 +572,7 @@ function Main() {
     }
 
     function updateLocation() {
-        locationView.innerText = '座標: ' + -(mapX / realPixelSize | 0) + ',' + (mapY / realPixelSize | 0);
+        locationView.innerText = 'location: ' + -(mapX / realPixelSize | 0) + ',' + (mapY / realPixelSize | 0);
         refreshScreen();
     }
 
