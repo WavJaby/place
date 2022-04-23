@@ -1,14 +1,13 @@
-const databaseURL = 'https://script.google.com/macros/s/AKfycbx5nYlL6apT4RdFSf6hz7Gk-NvF8uFAlPCZo-lLiVy6-Csc2AVFbf3eakrz3-9E8is/exec';
-const chunks = {};
-//螢幕設定
+//螢幕
 let screenScale = 1.5;
-let screenMinScale = 0.1;
-let drawLineScreenScale = 1.5;
-let enableStroke = false;
-let strokeStyle = 'rgb(54, 54, 54)';
-let background = 'rgb(30, 30, 30)';
-let placeErrorColor = 'rgb(255, 0, 0)';
-
+const screenMinScale = 0.05;
+const screenMaxScale = 5;
+const drawLineScreenScale = 1.5;
+const enableStroke = false;
+// 顏色
+const strokeStyle = 'rgb(54, 54, 54)';
+const background = 'rgb(30, 30, 30)';
+const placeErrorColor = 'rgb(255, 0, 0)';
 const COLOR_MAP = [
     new Color(0x000000),  // black
     new Color(0x6D001A),  // darkest red
@@ -43,13 +42,20 @@ const COLOR_MAP = [
     new Color(0xD4D7D9),  // light gray
     new Color(0xFFFFFF),  // white
 ];
-
-//chunk資訊
+const databaseURL = 'https://script.google.com/macros/s/AKfycbwDgl_Q0JBhgeatpCcTIxT07S0h0JhrJ-T2xMj8hpPjdM6--klOyLjbfmrs4wnvH8C2/exec';
+const chunks = {};
 const chunkWidth = 16, chunkHeight = 16
-let chunkWidthCount, chunkHeightCount;
 const cellSize = 10, cellWallGap = 2;
-let realPixelSize;
+const chunkWidthShift = Math.log2(chunkWidth);
+const chunkHeightShift = Math.log2(chunkHeight);
+const chunkWidthMask = (0b1 << chunkWidthShift) - 1;
+const chunkHeightMask = (0b1 << chunkHeightShift) - 1;
+
+const uploadInterval = 2000;
+const updateInterval = 3000;
+
 let mapX = 0, mapY = 0;
+let realPixelSize;
 
 function Main() {
     const playground = document.getElementById('playground');
@@ -61,6 +67,7 @@ function Main() {
     // const miniMapElement = document.getElementById('miniMap');
     // const minMap = new MiniMap(colors, miniMapElement);
 
+    let chunkWidthCount, chunkHeightCount;
     // 範例
     let lastDrawPosX = 0, lastDrawPosY = 0;
     let lastMousePosX = 0, lastMousePosY = 0;
@@ -69,12 +76,20 @@ function Main() {
     let moved = false;
     let lastMouseX, lastMouseY;
     // 縮放
-    let delta = 0.1;
+    let delta = 0.2;
     // 顏色
     let selectColorCode = 0;
+    // 上傳更新
+    const uploadPixelInterval = setInterval(uploadColorChange, uploadInterval);
+    let changeLength = 0;
+    let uploadBuffer = {};
+    // 取得更新
+    const updatePixelInterval = setInterval(updateColorChange, updateInterval);
+    let lastUpdateTimeStamp = 0;
+
 
     /** init */
-    realPixelSize = ((cellSize * screenScale) * 10 | 0) / 10;
+    realPixelSize = ((cellSize * screenScale) * 100 | 0) / 100;
     gameWindow.style.backgroundColor = background;
     resizeScreen();
     getData('t=0', i => {
@@ -82,13 +97,11 @@ function Main() {
         const width = parseInt(i[0]), height = parseInt(i[1]);
         chunkWidthCount = width;
         chunkHeightCount = height;
-        for (let x = 0; x < width; x++) {
-            for (let y = 0; y < height; y++) {
-                getData(`x=${x}&y=${y}`, data => {
-                    getChunk(x, y).loadChunk(data.split(','), canvas);
-                });
-            }
-        }
+        const chunkDataLength = chunkWidth * chunkHeight;
+        let readOffset = 2;
+        for (let y = 0; y < height; y++)
+            for (let x = 0; x < width; x++)
+                getChunk(x, y).loadChunk(base64Decode(i[readOffset++]), chunkDataLength, canvas);
     });
 
     const colorSelectionAreaHeight = (window.innerHeight - 20);
@@ -107,11 +120,83 @@ function Main() {
         colorSelectionArea.appendChild(colorSelection);
     }
 
+    function base64Encode(data, callback) {
+        const reader = new FileReader();
+        reader.onload = () => callback(reader.result.split(',')[1]);
+        reader.readAsDataURL(new Blob([data]));
+    }
+
+    function base64Decode(data) {
+        return Uint8Array.from(atob(data), c => c.charCodeAt(0));
+    }
+
 
     // loadExample();
     // minMap.updateMiniMap(true);
 
     /** listener */
+    function onColorSelect(e) {
+        selectColorCode = e.target.colorID;
+    }
+
+    function onColorChange(chunkX, chunkY, x, y, color) {
+        let chunk;
+        if (uploadBuffer[chunkX] === undefined)
+            chunk = ((uploadBuffer[chunkX] = {})[chunkY] = {});
+        else if (uploadBuffer[chunkX][chunkY] === undefined)
+            chunk = (uploadBuffer[chunkX][chunkY] = {});
+        else
+            chunk = uploadBuffer[chunkX][chunkY];
+
+        if (chunk[x] === undefined)
+            (chunk[x] = {})[y] = color;
+        else
+            chunk[x][y] = color;
+        changeLength++;
+    }
+
+    function uploadColorChange() {
+        if (changeLength === 0) return;
+        changeLength = 0;
+        for (const chunkX in uploadBuffer) {
+            const chunkXData = uploadBuffer[chunkX];
+            for (const chunkY in chunkXData) {
+                const chunkUpdateData = chunkXData[chunkY];
+                const out = [];
+                for (const x in chunkUpdateData) {
+                    const cache = chunkUpdateData[x];
+                    for (const y in cache) {
+                        out.push(parseInt(x), parseInt(y), cache[y]);
+                    }
+                }
+                chunkXData[chunkY] = out;
+            }
+        }
+        postData(JSON.stringify(uploadBuffer));
+        uploadBuffer = {};
+    }
+
+    function updateColorChange() {
+        getData('t=1', i => {
+            i = i.split(',');
+            if (lastUpdateTimeStamp === parseInt(i[0])) return;
+            lastUpdateTimeStamp = parseInt(i[0]);
+            for (let j = 2; j < i.length; j += 3) {
+                const x = parseInt(i[j]), y = parseInt(i[j + 1]), color = parseInt(i[j + 2]);
+                const chunkX = x >>> chunkWidthShift, chunkY = y >>> chunkHeightShift;
+                const pixelX = x & chunkWidthMask, pixelY = y & chunkHeightMask;
+                // let cache;
+                // if ((cache = uploadBuffer[chunkX]) === undefined ||
+                //     (cache = cache[chunkY]) === undefined ||
+                //     (cache = cache[pixelX]) === undefined ||
+                //     (cache = cache[pixelY]) === undefined
+                // )
+                getChunk(chunkX, chunkY)
+                    .setPixel(pixelX, pixelY, color, canvas);
+            }
+        });
+    }
+
     window.onkeydown = function (event) {
         // if (selectModel) {
         //     if (event.key === 'r') {
@@ -196,7 +281,6 @@ function Main() {
                 return;
             }
 
-
             const chunk = getChunk(cx, cy);
 
             //chunk裡的x,y
@@ -208,8 +292,8 @@ function Main() {
             //     let chunkStartY = cy * realPixelSize * chunkHeight;
             //     canvas.fillRect(chunkStartX + xInC * realPixelSize, chunkStartY + yInC * realPixelSize, realPixelSize, realPixelSize);
             // } else {
-            chunk.setPixel(xInC, yInC, selectColorCode, canvas);
-            uploadData(x, y, selectColorCode);
+            if (chunk.setPixel(xInC, yInC, selectColorCode, canvas))
+                onColorChange(cx, cy, xInC, yInC, selectColorCode);
             // calculateChangeLaterChunk();
             // }
             // chunk.drawChangeCells(canvas);
@@ -233,7 +317,7 @@ function Main() {
             lastMouseY = event.offsetY;
 
             moved = true;
-            move();
+            updateLocation();
         }
 
         //畫範例
@@ -253,25 +337,31 @@ function Main() {
         if (event.deltaY > 0)
             delta *= -1;
 
-        screenScale = Math.round((screenScale + delta) * 10) / 10;
+        if (screenScale < (screenMaxScale - screenMinScale) / 5)
+            screenScale = ((screenScale + delta / 4) * 100 | 0) / 100;
+        else if (screenScale > (screenMaxScale - screenMinScale) * 2 / 5)
+            screenScale = ((screenScale + delta * 2) * 100 | 0) / 100;
+        else
+            screenScale = ((screenScale + delta) * 100 | 0) / 100;
 
-        if (screenScale < screenMinScale) {
+        if (screenScale < screenMinScale)
             screenScale = screenMinScale;
-        }
+        else if (screenScale > screenMaxScale)
+            screenScale = screenMaxScale;
 
         if (lastScreenScale === screenScale)
             return;
 
-        realPixelSize = ((cellSize * screenScale) * 10 | 0) / 10;
-        refreshScreen();
-    }
-
-    function onColorSelect(e) {
-        selectColorCode = e.target.colorID;
+        const lastRealPixelSize = realPixelSize;
+        realPixelSize = ((cellSize * screenScale) * 100 | 0) / 100;
+        mapX += (((event.offsetX - mapX) / realPixelSize - (event.offsetX - mapX) / lastRealPixelSize) * realPixelSize) | 0;
+        mapY += (((event.offsetY - mapY) / realPixelSize - (event.offsetY - mapY) / lastRealPixelSize) * realPixelSize) | 0;
+        updateLocation();
     }
 
     /** draw */
     function drawAllChunks() {
+        canvas.imageSmoothingEnabled = false;
         const adjustX = mapX < 0;
         const adjustY = mapY < 0;
 
@@ -280,8 +370,8 @@ function Main() {
 
         canvas.clearRect(0, 0, viewWidth, viewHeight);
         //計算畫面中有幾個chunk
-        const xChunkCount = (viewWidth / realPixelSize * chunkWidth + 2) | 0;
-        const yChunkCount = (viewHeight / realPixelSize * chunkHeight + 2) | 0;
+        const xChunkCount = (viewWidth / (realPixelSize * chunkWidth) + 2) | 0;
+        const yChunkCount = (viewHeight / (realPixelSize * chunkHeight) + 2) | 0;
 
         //計算chunk開始位置X
         const startX = ((-mapX / realPixelSize / chunkWidth | 0) - 1 + adjustX);
@@ -481,7 +571,7 @@ function Main() {
         }
     }
 
-    function move() {
+    function updateLocation() {
         locationView.innerText = '座標: ' + -(mapX / realPixelSize | 0) + ',' + (mapY / realPixelSize | 0);
         refreshScreen();
     }
@@ -499,9 +589,6 @@ function Main() {
     }
 
     /** database control */
-    function uploadData(x, y, color) {
-        postData(`${x},${y},${color}`);
-    }
 
     function getData(parameter, callBack) {
         fetch(databaseURL + '?' + parameter, {
@@ -519,7 +606,7 @@ function Main() {
     function postData(body, callBack) {
         fetch(databaseURL, {
             headers: {
-                'content-type': 'text/plain;charset=utf-8',
+                'content-type': 'text/plain',
             },
             cache: 'no-cache',
             credentials: 'same-origin',
@@ -527,7 +614,7 @@ function Main() {
             redirect: 'follow',
             method: 'POST',
             body: body
-        }).then(data => callBack);
+        }).then(callBack);
     }
 
     /** chunk control */
